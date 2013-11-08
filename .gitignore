@@ -1,13 +1,7 @@
-*.class
-*.log
-
-# sbt specific
-dist/*
+*~
+project/
 target/
-lib_managed/
-src_managed/
-project/boot/
-project/plugins/project/
-
-# Scala-IDE specific
-.scala_dependencies
+lib/
+.idea/
+out/
+ScalaMapPerformance.iml
