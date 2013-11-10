@@ -4,7 +4,6 @@ import scala.language.higherKinds
 import ichi.bench.Thyme.Benched
 import ichi.bench._
 import scala.util.Random
-import scala.collection.immutable
 
 abstract class MapTest[A, B, C[_, _]] {
   def load(rn: IndexedSeq[A], n: Int): C[A, B]
@@ -104,7 +103,9 @@ object JMutInt extends JMut[Int]
 object JMutString extends JMut[String]
 
 
-case class Result(title: String, count: Int, runtime: Double)
+case class Result(title: String, count: Int, runtime: Double) extends Ordered[Result] {
+  def compare(that: Result): Int = this.runtime.compareTo(that.runtime)
+}
 
 case class Operation(title: String, work: (Int) => () => Any)
 
@@ -152,10 +153,10 @@ object Main {
 
   def niceTime(t: Double): String = {
     t match {
-      case x if x < 100.0 => f"$x%.2f ns"
-      case x if x < 100.0 * 1000.0 => val y = x / 1000.0; f"$y%.2f us"
-      case x if x < 100.0 * 1000.0 * 1000.0 => val y = x / 1000.0 / 1000.0; f"$y%.2f ms"
-      case x => val y = x / 1000.0 / 1000.0 / 1000.0; f"$y%.2f s"
+      case x if x < 100.0 => f"$x%.4f ns"
+      case x if x < 100.0 * 1000.0 => val y = x / 1000.0; f"$y%.4f us"
+      case x if x < 100.0 * 1000.0 * 1000.0 => val y = x / 1000.0 / 1000.0; f"$y%.4f ms"
+      case x => val y = x / 1000.0 / 1000.0 / 1000.0; f"$y%.4f s"
     }
   }
 
@@ -190,42 +191,54 @@ object Main {
 
     val th = if (warm) Thyme.warmed(verbose = print) else new Thyme
     val loadSize = List(25, 50, 100, 250, 500, 1000, 10000, 100000)
+
     val operations = List(
-      ("Map Load Relative to java HashMap, Int keys",
-        List(Operation("J H", new TestLoadFunction(JMutInt, rn)),
-          Operation("S M", new TestLoadFunction(MutInt, rn)),
-          Operation("S I", new TestLoadFunction(ImmutInt, rn)))),
-      ("Map Read Relative to java HashMap, Int keys",
+      ("Map Load, Int keys",
         List(
-          Operation("J H", new TestReadFunction(JMutInt, rn)),
-          Operation("S M", new TestReadFunction(MutInt, rn)),
-          Operation("S I", new TestReadFunction(ImmutInt, rn))
+          Operation("J Hi", new TestLoadFunction(JMutInt, rn)),
+          Operation("S Mi", new TestLoadFunction(MutInt, rn)),
+          Operation("S Ii", new TestLoadFunction(ImmutInt, rn)))),
+      ("Map Read, Int keys",
+        List(
+          Operation("J Hi", new TestReadFunction(JMutInt, rn)),
+          Operation("S Mi", new TestReadFunction(MutInt, rn)),
+          Operation("S Ii", new TestReadFunction(ImmutInt, rn))
         )
         ),
-      ("Map Load Relative to java HashMap, String keys",
-        List(Operation("J H", new TestLoadFunction(JMutString, rs)),
-          Operation("S M", new TestLoadFunction(MutString, rs)),
-          Operation("S I", new TestLoadFunction(ImmutString, rs)))),
-      ("Map Read Relative to java HashMap, String keys",
+      ("Map Load, String keys",
         List(
-          Operation("J H", new TestReadFunction(JMutString, rs)),
-          Operation("S M", new TestReadFunction(MutString, rs)),
-          Operation("S I", new TestReadFunction(ImmutString, rs))
+          Operation("J Hs", new TestLoadFunction(JMutString, rs)),
+          Operation("S Ms", new TestLoadFunction(MutString, rs)),
+          Operation("S Is", new TestLoadFunction(ImmutString, rs)))),
+      ("Map Read, String keys",
+        List(
+          Operation("J Hs", new TestReadFunction(JMutString, rs)),
+          Operation("S Ms", new TestReadFunction(MutString, rs)),
+          Operation("S Is", new TestReadFunction(ImmutString, rs))
         )
         )
-
     )
 
-    for (it <- 1 to its) {
-      println("Iteration " + it)
-      for ((heading, ops) <- operations) {
-        val results = for (op <- ops) yield {
-          for (n <- loadSize) yield {
+    val tailFraction = 0.25
+    val tailN = Math.round(its * tailFraction) match {
+      case n if n < 1 => if (its > 2) 1 else 0
+      case n if n * 2 >= its => if (its % 2 == 0) its / 2 - 2 else its / 2 // Median
+      case n => n.toInt
+    }
+
+    for ((heading, ops) <- operations) {
+      val results = for (op <- ops) yield {
+        for (n <- loadSize) yield {
+          val r = for (it <- 1 to its) yield {
             benchPress(th, op, n)
           }
+          val rs = r.sorted
+          val robustRuntime = r.slice(tailN, its - tailN).foldLeft(0.0)((z, e) => z + e.runtime) / (its - 2 * tailN)
+          rs.head.copy(runtime = robustRuntime)
         }
-        report(heading, results)
       }
+      report(heading + " (Relative to Java HashMap", results)
+      report(heading + " (Relative to Scala Mutable Map", results.tail)
     }
 
   }
