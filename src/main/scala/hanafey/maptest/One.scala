@@ -141,22 +141,32 @@ object RandomStrings {
 
 
 object Main {
-  val rn = (1 to 100000).map(i => Random.nextInt())
-  val rs = (1 to 100000).map(i => RandomStrings.nextString(15, 6))
+  val maxN = 100000
+  val rn = (1 to maxN).map(i => Random.nextInt())
+  val rs = (1 to maxN).map(i => RandomStrings.nextString(15, 6))
+  var warmBench = true
 
   def benchPress(thyme: Thyme, op: Operation, n: Int): Result = {
     val br = Benched.empty
     val work = op.work(n)
-    thyme.benchWarm(thyme.Warm(work()))(br)
-    Result(op.title, n, br.runtime * 1.0e9)
+    if (warmBench) {
+      thyme.benchWarm(thyme.Warm(work()))(br)
+    } else {
+      thyme.bench(work())(br)
+    }
+    Result(op.title, n, br.runtime * 1.0e6)
   }
 
   def niceTime(t: Double): String = {
+
     t match {
-      case x if x < 100.0 => f"$x%.4f ns"
-      case x if x < 100.0 * 1000.0 => val y = x / 1000.0; f"$y%.4f us"
-      case x if x < 100.0 * 1000.0 * 1000.0 => val y = x / 1000.0 / 1000.0; f"$y%.4f ms"
-      case x => val y = x / 1000.0 / 1000.0 / 1000.0; f"$y%.4f s"
+      case x if x < 1.0 => f"$x%.4f"
+      case x if x < 10.0 => f"$x%.3f"
+      case x if x < 100.0 => f"$x%.2f"
+      case x if x < 1000.0 => f"$x%.1f"
+      case x => {
+        val y = Math.round(x); f"$y%d"
+      }
     }
   }
 
@@ -164,11 +174,13 @@ object Main {
     println()
     println(title)
     val ref :: rest = results
-    println(("" :: ref.map(r => r.count)).mkString("\t"))
+    print(("" :: ref.map(r => r.count)).mkString("\t"))
+    println(s"\tMap size")
     println(
       List(
         ref.head.title,
-        ref.map(r => niceTime(r.runtime)).mkString("\t")
+        ref.map(r => niceTime(r.runtime)).mkString("\t"),
+        "Micro Seconds"
       ).mkString("\t")
     )
     for (cr <- rest) {
@@ -178,7 +190,8 @@ object Main {
           cr.zip(ref).map(t => {
             val ratio = 100.0 * t._2.runtime / t._1.runtime
             f"$ratio%.2f"
-          }).mkString("\t")
+          }).mkString("\t"),
+          "Percent"
         ).mkString("\t")
       )
     }
@@ -187,6 +200,7 @@ object Main {
   def main(args: Array[String]) {
 
     val warm = if (args.length > 0) args(0).toUpperCase.startsWith("W") else false
+    warmBench = if (args.length > 0) args(0).toUpperCase.endsWith("W") else false
     val its = if (args.length > 1) args(1).toInt else 1
 
     val th = if (warm) Thyme.warmed(verbose = print) else new Thyme
@@ -237,8 +251,8 @@ object Main {
           rs.head.copy(runtime = robustRuntime)
         }
       }
-      report(heading + " (Relative to Java HashMap", results)
-      report(heading + " (Relative to Scala Mutable Map", results.tail)
+      report(heading + " (Relative to Java HashMap)", results)
+      report(heading + " (Relative to Scala Mutable Map)", results.tail)
     }
 
   }
