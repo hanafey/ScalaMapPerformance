@@ -53,6 +53,27 @@ class Mut[A] extends MapTest[A, Int, collection.mutable.Map] {
   }
 }
 
+class MutImmut[A] extends MapTest[A, Int, collection.Map] {
+  def load(rn: IndexedSeq[A], n: Int): collection.Map[A, Int] = {
+    val cache = collection.mutable.Map.empty[A, Int]
+    var i = 0
+    while (i < n) {
+      cache(rn(i)) = i
+      i += 1
+    }
+    cache.toMap
+  }
+
+  def read(rn: IndexedSeq[A], from: collection.Map[A, Int], n: Int): Unit = {
+    var i = 0
+    while (i < n) {
+      val v = from(rn(i))
+      if (v < i) throw new Exception(s"Failure $v, $i")
+      i += 1
+    }
+  }
+}
+
 class MutSized[A] extends Mut[A] {
   override def load(rn: IndexedSeq[A], n: Int): collection.mutable.Map[A, Int] = {
     val cache = collection.mutable.Map.empty[A, Int]
@@ -94,9 +115,13 @@ object ImmutString extends Immut[String]
 
 object MutInt extends Mut[Int]
 
+object MutImmutInt extends MutImmut[Int]
+
 object MutIntSized extends MutSized[Int]
 
 object MutString extends Mut[String]
+
+object MutImmutString extends MutImmut[String]
 
 object JMutInt extends JMut[Int]
 
@@ -165,7 +190,8 @@ object Main {
       case x if x < 100.0 => f"$x%.2f"
       case x if x < 1000.0 => f"$x%.1f"
       case x => {
-        val y = Math.round(x); f"$y%d"
+        val y = Math.round(x);
+        f"$y%d"
       }
     }
   }
@@ -202,20 +228,27 @@ object Main {
     val warm = if (args.length > 0) args(0).toUpperCase.startsWith("W") else false
     warmBench = if (args.length > 0) args(0).toUpperCase.endsWith("W") else false
     val its = if (args.length > 1) args(1).toInt else 1
+    val small = if (args.length > 2) args(2).toUpperCase.startsWith("S") else false
 
     val th = if (warm) Thyme.warmed(verbose = print) else new Thyme
-    val loadSize = List(25, 50, 100, 250, 500, 1000, 10000, 100000)
+    val loadSize = if (small) {
+      List(250, 1000)
+    } else {
+      List(25, 50, 100, 250, 500, 1000, 10000, 100000)
+    }
 
     val operations = List(
       ("Map Load, Int keys",
         List(
           Operation("J Hi", new TestLoadFunction(JMutInt, rn)),
           Operation("S Mi", new TestLoadFunction(MutInt, rn)),
+          Operation("S MIi", new TestLoadFunction(MutImmutInt, rn)),
           Operation("S Ii", new TestLoadFunction(ImmutInt, rn)))),
       ("Map Read, Int keys",
         List(
           Operation("J Hi", new TestReadFunction(JMutInt, rn)),
           Operation("S Mi", new TestReadFunction(MutInt, rn)),
+          Operation("S MIi", new TestReadFunction(MutImmutInt, rn)),
           Operation("S Ii", new TestReadFunction(ImmutInt, rn))
         )
         ),
@@ -223,11 +256,13 @@ object Main {
         List(
           Operation("J Hs", new TestLoadFunction(JMutString, rs)),
           Operation("S Ms", new TestLoadFunction(MutString, rs)),
+          Operation("S MIs", new TestLoadFunction(MutImmutString, rs)),
           Operation("S Is", new TestLoadFunction(ImmutString, rs)))),
       ("Map Read, String keys",
         List(
           Operation("J Hs", new TestReadFunction(JMutString, rs)),
           Operation("S Ms", new TestReadFunction(MutString, rs)),
+          Operation("S MIs", new TestReadFunction(MutImmutString, rs)),
           Operation("S Is", new TestReadFunction(ImmutString, rs))
         )
         )
@@ -251,8 +286,13 @@ object Main {
           rs.head.copy(runtime = robustRuntime)
         }
       }
+      println("=" * 80)
+      println(heading)
+      println("=" * 80)
       report(heading + " (Relative to Java HashMap)", results)
       report(heading + " (Relative to Scala Mutable Map)", results.tail)
+      report(heading + " (Relative to Scala Mutable -> Immutable Map)", results.tail.tail)
+      println
     }
 
   }
