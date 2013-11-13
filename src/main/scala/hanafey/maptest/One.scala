@@ -4,11 +4,15 @@ import scala.language.higherKinds
 import ichi.bench.Thyme.Benched
 import ichi.bench._
 import scala.util.Random
+import java.util
+import java.util.Map.Entry
 
 abstract class MapTest[A, B, C[_, _]] {
   def load(rn: IndexedSeq[A], n: Int): C[A, B]
 
   def read(rn: IndexedSeq[A], from: C[A, B], n: Int): Any
+
+  def transform(input: C[A, B]): C[A, B] = throw new UnsupportedOperationException
 }
 
 class Immut[A] extends MapTest[A, Int, Map] {
@@ -30,6 +34,10 @@ class Immut[A] extends MapTest[A, Int, Map] {
       i += 1
     }
   }
+
+  override def transform(input: Map[A, Int]): Map[A, Int] = {
+    input.map(kv => kv)
+  }
 }
 
 class Mut[A] extends MapTest[A, Int, collection.mutable.Map] {
@@ -50,6 +58,10 @@ class Mut[A] extends MapTest[A, Int, collection.mutable.Map] {
       if (v < i) throw new Exception(s"Failure $v, $i")
       i += 1
     }
+  }
+
+  override def transform(input: collection.mutable.Map[A, Int]): collection.mutable.Map[A, Int] = {
+    input.map(kv => kv)
   }
 }
 
@@ -107,6 +119,16 @@ class JMut[A] extends MapTest[A, Int, java.util.HashMap] {
       i += 1
     }
   }
+
+  override def transform(input: util.HashMap[A, Int]): util.HashMap[A, Int] = {
+    val out: util.HashMap[A, Int] = new util.HashMap[A, Int](input.size())
+    val it: util.Iterator[Entry[A, Int]] = input.entrySet().iterator()
+    while (it.hasNext) {
+      val next: Entry[A, Int] = it.next()
+      out.put(next.getKey, next.getValue)
+    }
+    out
+  }
 }
 
 object ImmutInt extends Immut[Int]
@@ -153,6 +175,17 @@ class TestReadFunction[A, B, C[_, _]](m: MapTest[A, B, C], keys: IndexedSeq[A]) 
   }
 }
 
+class TestTransformFunction[A, B, C[_, _]](m: MapTest[A, B, C], keys: IndexedSeq[A]) extends Function[Int, () => Any] {
+  def apply(n: Int): () => Any = {
+    val from = m.load(keys, n)
+    new (() => Any) {
+      def apply() = {
+        m.transform(from)
+      }
+    }
+  }
+}
+
 object RandomStrings {
   def nextString(n: Int, m: Int): String = {
     val sb = new StringBuilder(n)
@@ -190,7 +223,7 @@ object Main {
       case x if x < 100.0 => f"$x%.2f"
       case x if x < 1000.0 => f"$x%.1f"
       case x => {
-        val y = Math.round(x);
+        val y = Math.round(x)
         f"$y%d"
       }
     }
@@ -231,6 +264,7 @@ object Main {
     val small = if (args.length > 2) args(2).toUpperCase.startsWith("S") else false
 
     val th = if (warm) Thyme.warmed(verbose = print) else new Thyme
+
     val loadSize = if (small) {
       List(250, 1000)
     } else {
@@ -252,6 +286,13 @@ object Main {
           Operation("S Ii", new TestReadFunction(ImmutInt, rn))
         )
         ),
+      ("Map Identity Transform, Int keys",
+        List(
+          Operation("J Hi", new TestTransformFunction(JMutInt, rn)),
+          Operation("S Mi", new TestTransformFunction(MutInt, rn)),
+          Operation("S Ii", new TestTransformFunction(ImmutInt, rn))
+        )
+        ),
       ("Map Load, String keys",
         List(
           Operation("J Hs", new TestLoadFunction(JMutString, rs)),
@@ -264,6 +305,13 @@ object Main {
           Operation("S Ms", new TestReadFunction(MutString, rs)),
           Operation("S MIs", new TestReadFunction(MutImmutString, rs)),
           Operation("S Is", new TestReadFunction(ImmutString, rs))
+        )
+        ),
+      ("Map Identity Tranform, String keys",
+        List(
+          Operation("J Hs", new TestTransformFunction(JMutString, rs)),
+          Operation("S Ms", new TestTransformFunction(MutString, rs)),
+          Operation("S Is", new TestTransformFunction(ImmutString, rs))
         )
         )
     )
@@ -291,9 +339,10 @@ object Main {
       println("=" * 80)
       report(heading + " (Relative to Java HashMap)", results)
       report(heading + " (Relative to Scala Mutable Map)", results.tail)
-      report(heading + " (Relative to Scala Mutable -> Immutable Map)", results.tail.tail)
-      println
+      if (results.tail.size > 2) {
+        report(heading + " (Relative to Scala Mutable -> Immutable Map)", results.tail.tail)
+      }
+      println()
     }
-
   }
 }
