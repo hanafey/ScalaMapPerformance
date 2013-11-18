@@ -6,6 +6,7 @@ import ichi.bench._
 import scala.util.Random
 import java.util
 import java.util.Map.Entry
+import scala.collection.immutable.IntMap
 
 abstract class MapTest[A, B, C[_, _]] {
   def load(rn: IndexedSeq[A], n: Int): C[A, B]
@@ -40,6 +41,31 @@ class Immut[A] extends MapTest[A, Int, Map] {
   }
 }
 
+object ImmutIntMap extends MapTest[Int, Int, Map] {
+  def load(rn: IndexedSeq[Int], n: Int): Map[Int, Int] = {
+    var cache = IntMap.empty[Int]
+    var i = 0
+    while (i < n) {
+      cache = cache.updated(rn(i), i)
+      i += 1
+    }
+    cache
+  }
+
+  def read(rn: IndexedSeq[Int], from: Map[Int, Int], n: Int): Unit = {
+    var i = 0
+    while (i < n) {
+      val v = from(rn(i))
+      if (v < i) throw new Exception(s"Failure $v, $i")
+      i += 1
+    }
+  }
+
+  override def transform(input: Map[Int, Int]): Map[Int, Int] = {
+    input.map(kv => kv)
+  }
+}
+
 class Mut[A] extends MapTest[A, Int, collection.mutable.Map] {
   def load(rn: IndexedSeq[A], n: Int): collection.mutable.Map[A, Int] = {
     val cache = collection.mutable.Map.empty[A, Int]
@@ -61,6 +87,31 @@ class Mut[A] extends MapTest[A, Int, collection.mutable.Map] {
   }
 
   override def transform(input: collection.mutable.Map[A, Int]): collection.mutable.Map[A, Int] = {
+    input.map(kv => kv)
+  }
+}
+
+class Con[A] extends MapTest[A, Int, collection.concurrent.TrieMap] {
+  def load(rn: IndexedSeq[A], n: Int): collection.concurrent.TrieMap[A, Int] = {
+    val cache = collection.concurrent.TrieMap.empty[A, Int]
+    var i = 0
+    while (i < n) {
+      cache(rn(i)) = i
+      i += 1
+    }
+    cache
+  }
+
+  def read(rn: IndexedSeq[A], from: collection.concurrent.TrieMap[A, Int], n: Int): Unit = {
+    var i = 0
+    while (i < n) {
+      val v = from(rn(i))
+      if (v < i) throw new Exception(s"Failure $v, $i")
+      i += 1
+    }
+  }
+
+  override def transform(input: collection.concurrent.TrieMap[A, Int]): collection.concurrent.TrieMap[A, Int] = {
     input.map(kv => kv)
   }
 }
@@ -137,11 +188,15 @@ object ImmutString extends Immut[String]
 
 object MutInt extends Mut[Int]
 
+object ConInt extends Con[Int]
+
 object MutImmutInt extends MutImmut[Int]
 
 object MutIntSized extends MutSized[Int]
 
 object MutString extends Mut[String]
+
+object ConString extends Con[String]
 
 object MutImmutString extends MutImmut[String]
 
@@ -233,7 +288,7 @@ object Main {
     println()
     println(title)
     val ref :: rest = results
-    print(("" :: ref.map(r => r.count)).mkString("\t"))
+    print(("          " :: ref.map(r => r.count)).mkString("\t"))
     println(s"\tMap size")
     println(
       List(
@@ -266,7 +321,7 @@ object Main {
     val th = if (warm) Thyme.warmed(verbose = print) else new Thyme
 
     val loadSize = if (small) {
-      List(250, 1000)
+      List(250, 1000, 2000)
     } else {
       List(25, 50, 100, 250, 500, 1000, 10000, 100000)
     }
@@ -274,46 +329,52 @@ object Main {
     val operations = List(
       ("Map Load, Int keys",
         List(
-          Operation("J Hi", new TestLoadFunction(JMutInt, rn)),
-          Operation("S Mi", new TestLoadFunction(MutInt, rn)),
-          Operation("S MIi", new TestLoadFunction(MutImmutInt, rn)),
-          Operation("S Ii", new TestLoadFunction(ImmutInt, rn)))),
+          Operation("Java      ", new TestLoadFunction(JMutInt, rn)),
+          Operation("mu.Map    ", new TestLoadFunction(MutInt, rn)),
+          Operation("co.TrieMap", new TestLoadFunction(ConInt, rn)),
+          Operation("mu->im.Map", new TestLoadFunction(MutImmutInt, rn)),
+          Operation("im.Map    ", new TestLoadFunction(ImmutInt, rn)),
+          Operation("im.IntMap ", new TestLoadFunction(ImmutIntMap, rn))
+        )),
       ("Map Read, Int keys",
         List(
-          Operation("J Hi", new TestReadFunction(JMutInt, rn)),
-          Operation("S Mi", new TestReadFunction(MutInt, rn)),
-          Operation("S MIi", new TestReadFunction(MutImmutInt, rn)),
-          Operation("S Ii", new TestReadFunction(ImmutInt, rn))
-        )
-        ),
+          Operation("Java      ", new TestReadFunction(JMutInt, rn)),
+          Operation("mu.Map    ", new TestReadFunction(MutInt, rn)),
+          Operation("co.TrieMap", new TestReadFunction(ConInt, rn)),
+          Operation("mu->im.Map", new TestReadFunction(MutImmutInt, rn)),
+          Operation("im.Map    ", new TestReadFunction(ImmutInt, rn)),
+          Operation("im.IntMap ", new TestReadFunction(ImmutIntMap, rn))
+        )),
       ("Map Identity Transform, Int keys",
         List(
-          Operation("J Hi", new TestTransformFunction(JMutInt, rn)),
-          Operation("S Mi", new TestTransformFunction(MutInt, rn)),
-          Operation("S Ii", new TestTransformFunction(ImmutInt, rn))
-        )
-        ),
+          Operation("Java      ", new TestTransformFunction(JMutInt, rn)),
+          Operation("mu.Map    ", new TestTransformFunction(MutInt, rn)),
+          Operation("co.TrieMap", new TestTransformFunction(ConInt, rn)),
+          Operation("im.Map    ", new TestTransformFunction(ImmutInt, rn)),
+          Operation("im.IntMap ", new TestTransformFunction(ImmutIntMap, rn))
+        )),
       ("Map Load, String keys",
         List(
-          Operation("J Hs", new TestLoadFunction(JMutString, rs)),
-          Operation("S Ms", new TestLoadFunction(MutString, rs)),
-          Operation("S MIs", new TestLoadFunction(MutImmutString, rs)),
-          Operation("S Is", new TestLoadFunction(ImmutString, rs)))),
+          Operation("Java      ", new TestLoadFunction(JMutString, rs)),
+          Operation("mu.Map    ", new TestLoadFunction(MutString, rs)),
+          Operation("co.TrieMap", new TestLoadFunction(ConString, rs)),
+          Operation("mu->im.Map", new TestLoadFunction(MutImmutString, rs)),
+          Operation("im.Map    ", new TestLoadFunction(ImmutString, rs)))),
       ("Map Read, String keys",
         List(
-          Operation("J Hs", new TestReadFunction(JMutString, rs)),
-          Operation("S Ms", new TestReadFunction(MutString, rs)),
-          Operation("S MIs", new TestReadFunction(MutImmutString, rs)),
-          Operation("S Is", new TestReadFunction(ImmutString, rs))
-        )
-        ),
+          Operation("Java      ", new TestReadFunction(JMutString, rs)),
+          Operation("mu.Map    ", new TestReadFunction(MutString, rs)),
+          Operation("co.TrieMap", new TestReadFunction(ConString, rs)),
+          Operation("mu->im.Map", new TestReadFunction(MutImmutString, rs)),
+          Operation("im.Map    ", new TestReadFunction(ImmutString, rs))
+        )),
       ("Map Identity Tranform, String keys",
         List(
-          Operation("J Hs", new TestTransformFunction(JMutString, rs)),
-          Operation("S Ms", new TestTransformFunction(MutString, rs)),
-          Operation("S Is", new TestTransformFunction(ImmutString, rs))
-        )
-        )
+          Operation("Java      ", new TestTransformFunction(JMutString, rs)),
+          Operation("mu.Map    ", new TestTransformFunction(MutString, rs)),
+          Operation("co.TrieMap", new TestTransformFunction(ConString, rs)),
+          Operation("im.Map    ", new TestTransformFunction(ImmutString, rs))
+        ))
     )
 
     val tailFraction = 0.25
@@ -338,9 +399,12 @@ object Main {
       println(heading)
       println("=" * 80)
       report(heading + " (Relative to Java HashMap)", results)
-      report(heading + " (Relative to Scala Mutable Map)", results.tail)
-      if (results.tail.size > 2) {
-        report(heading + " (Relative to Scala Mutable -> Immutable Map)", results.tail.tail)
+      if (false) {
+        // Results relative to 2nd and 3rd tests in a sets
+        report(heading + " (Relative to Scala Mutable Map)", results.tail)
+        if (results.tail.size > 2) {
+          report(heading + " (Relative to Scala Mutable -> Immutable Map)", results.tail.tail)
+        }
       }
       println()
     }
